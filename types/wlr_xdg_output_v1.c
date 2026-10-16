@@ -1,10 +1,12 @@
 #include <assert.h>
+#include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/util/log.h>
+#include <wlr/util/server_scale.h>
 #include "xdg-output-unstable-v1-protocol.h"
 
 #define OUTPUT_MANAGER_VERSION 3
@@ -26,12 +28,26 @@ static void output_handle_resource_destroy(struct wl_resource *resource) {
 
 static void output_send_details(struct wlr_xdg_output_v1 *xdg_output,
 		struct wl_resource *resource) {
+	// Scale-overridden clients (Xwayland with "clients scale themselves") see
+	// logical geometry in their native (denser) coordinate space.
+	double scale = wlr_server_scale_get(wl_resource_get_client(resource));
 	zxdg_output_v1_send_logical_position(resource,
-		xdg_output->x, xdg_output->y);
+		round(xdg_output->x * scale), round(xdg_output->y * scale));
 	zxdg_output_v1_send_logical_size(resource,
-		xdg_output->width, xdg_output->height);
+		round(xdg_output->width * scale), round(xdg_output->height * scale));
 	if (wl_resource_get_version(resource) < OUTPUT_DONE_DEPRECATED_SINCE_VERSION) {
 		zxdg_output_v1_send_done(resource);
+	}
+}
+
+void wlr_xdg_output_manager_v1_resend(struct wlr_xdg_output_manager_v1 *manager) {
+	struct wlr_xdg_output_v1 *xdg_output;
+	wl_list_for_each(xdg_output, &manager->outputs, link) {
+		struct wl_resource *resource;
+		wl_resource_for_each(resource, &xdg_output->resources) {
+			output_send_details(xdg_output, resource);
+		}
+		wlr_output_schedule_done(xdg_output->layout_output->output);
 	}
 }
 
