@@ -48,4 +48,11 @@ struct wlr_xdg_output_manager_v1 {
 struct wlr_xdg_output_manager_v1 *wlr_xdg_output_manager_v1_create(
 	struct wl_display *display, struct wlr_output_layout *layout);
 
+/**
+ * Re-send logical position/size to every bound xdg-output resource, e.g.
+ * after a client's server-side scale override changed (see
+ * wlr_server_scale_set()).
+ */
+void wlr_xdg_output_manager_v1_resend(struct wlr_xdg_output_manager_v1 *manager);
+
 #endif
