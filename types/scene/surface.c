@@ -10,6 +10,8 @@
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_presentation_time.h>
 #include <wlr/types/wlr_single_pixel_buffer_v1.h>
+#include <wlr/util/region.h>
+#include <wlr/util/server_scale.h>
 #include <wlr/util/transform.h>
 #include "types/wlr_scene.h"
 
@@ -149,9 +151,13 @@ static void handle_scene_buffer_outputs_update(
 		wlr_surface_send_enter(surface->surface, event->active[i]->output);
 	}
 
-	double scale = get_surface_preferred_buffer_scale(surface->surface);
-	wlr_fractional_scale_v1_notify_scale(surface->surface, scale);
-	wlr_surface_set_preferred_buffer_scale(surface->surface, ceil(scale));
+	// Clients with a server-side scale override are already rendered at native
+	// density; don't ask them to scale on top of that.
+	if (wlr_server_scale_get(wl_resource_get_client(surface->surface->resource)) == 1.0) {
+		double scale = get_surface_preferred_buffer_scale(surface->surface);
+		wlr_fractional_scale_v1_notify_scale(surface->surface, scale);
+		wlr_surface_set_preferred_buffer_scale(surface->surface, ceil(scale));
+	}
 
 	if (scene->color_manager_v1 != NULL) {
 		struct wlr_image_description_v1_data img_desc = {0};
@@ -316,9 +322,22 @@ static void surface_reconfigure(struct wlr_scene_surface *scene_surface) {
 		}
 	}
 
+	// Server-side scale override (Xwayland "clients scale themselves"): the
+	// committed buffer is scale times denser than its nominal size — display
+	// it at 1/scale and shrink surface-space regions to match.
+	double server_scale = wlr_server_scale_get(wl_resource_get_client(surface->resource));
+	int dest_width = width;
+	int dest_height = height;
+	if (server_scale != 1.0) {
+		dest_width = round(width / server_scale);
+		dest_height = round(height / server_scale);
+		wlr_region_scale(&opaque, &opaque, 1.0 / server_scale);
+		pixman_region32_intersect_rect(&opaque, &opaque, 0, 0, dest_width, dest_height);
+	}
+
 	wlr_scene_buffer_set_opaque_region(scene_buffer, &opaque);
 	wlr_scene_buffer_set_source_box(scene_buffer, &src_box);
-	wlr_scene_buffer_set_dest_size(scene_buffer, width, height);
+	wlr_scene_buffer_set_dest_size(scene_buffer, dest_width, dest_height);
 	wlr_scene_buffer_set_transform(scene_buffer, state->transform);
 	wlr_scene_buffer_set_opacity(scene_buffer, opacity);
 	wlr_scene_buffer_set_transfer_function(scene_buffer, tf);
@@ -391,6 +410,14 @@ static bool scene_buffer_point_accepts_input(struct wlr_scene_buffer *scene_buff
 		double *sx, double *sy) {
 	struct wlr_scene_surface *scene_surface =
 		wlr_scene_surface_try_from_buffer(scene_buffer);
+
+	// Surface-local coordinates for scale-overridden clients are in their
+	// native (denser) space. The rewritten values propagate out of
+	// wlr_scene_node_at(), so input events reach the client pre-scaled.
+	double server_scale = wlr_server_scale_get(
+		wl_resource_get_client(scene_surface->surface->resource));
+	*sx *= server_scale;
+	*sy *= server_scale;
 
 	*sx += scene_surface->clip.x;
 	*sy += scene_surface->clip.y;
