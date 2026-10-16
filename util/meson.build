@@ -10,6 +10,7 @@ wlr_files += files(
 	'mem.c',
 	'rect_union.c',
 	'region.c',
+	'server_scale.c',
 	'set.c',
 	'shm.c',
 	'time.c',
