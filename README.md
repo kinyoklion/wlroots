@@ -1,3 +1,53 @@
+# Fork notice
+
+This repository is a fork of
+[wlroots](https://gitlab.freedesktop.org/wlroots/wlroots). The default branch,
+`master`, has the upstream code and one additional feature: a scale override
+for Xwayland clients. The sway and SwayFX forks below use this feature.
+
+## Purpose of the fork
+
+Wayland compositors usually show X11 windows at scale 1. On a HiDPI output, the
+compositor then makes the windows larger. The image is not clear.
+
+This feature permits the compositor to set a scale for the Xwayland client. The
+client then draws at the full resolution of the output. The compositor shows
+the buffer at the logical size, and the image is clear.
+
+The feature changes these parts of wlroots:
+
+- `util/server_scale.c` adds `wlr_server_scale_set()` and
+  `wlr_server_scale_get()`. They set and get the scale for one client.
+- `types/scene/surface.c` divides the buffer size by the scale. It multiplies
+  the input coordinates by the scale. It does not send fractional-scale events
+  to the client.
+- `types/wlr_xdg_output_v1.c` multiplies the logical output geometry by the
+  scale for the client. `wlr_xdg_output_manager_v1_resend()` sends the new
+  geometry after a scale change.
+
+## Branches
+
+- `master` is the default branch. It has upstream wlroots and the feature.
+  [kinyoklion/sway](https://github.com/kinyoklion/sway) uses this branch.
+- `x11-scaling-0.20` has wlroots 0.20.0 and the feature.
+  [kinyoklion/swayfx](https://github.com/kinyoklion/swayfx) uses this branch.
+- `x11-scaling` has the feature on the upstream commit of the first tests. Use
+  `master` for new work.
+
+## Related repositories
+
+- [kinyoklion/sway](https://github.com/kinyoklion/sway): sway with the
+  configuration commands for this feature.
+- [kinyoklion/swayfx](https://github.com/kinyoklion/swayfx): SwayFX with the
+  same configuration commands.
+
+Each of these repositories also has the feature as a patch file in
+`contrib/x11-scaling/wlroots/`.
+
+The text that follows is the upstream README.
+
+---
+
 # wlroots
 
 Pluggable, composable, unopinionated modules for building a [Wayland]
