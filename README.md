@@ -29,7 +29,9 @@ The feature changes these parts of wlroots:
 
 - `master` is the default branch. It has upstream wlroots and the feature.
   [kinyoklion/sway](https://github.com/kinyoklion/sway) uses this branch.
-- `x11-scaling-0.20` has wlroots 0.20.2 and the feature.
+- `x11-scaling-0.20` has wlroots 0.20.2 and the feature. It also corrects the
+  hardware cursor in virtual machines. This correction is optional:
+  `WLR_DRM_DUMB_CURSORS=0` disables it.
   [kinyoklion/swayfx](https://github.com/kinyoklion/swayfx) uses this branch.
 - `x11-scaling` has the feature on the upstream commit of the first tests. Use
   `master` for new work.
