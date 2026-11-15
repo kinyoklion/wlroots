@@ -271,6 +271,12 @@ struct wlr_output {
 		struct wlr_output_image_description image_description_value;
 		struct wlr_color_transform *color_transform;
 		struct wlr_color_primaries default_primaries_value;
+
+		// Set by the DRM backend on virtual GPUs: hardware cursor images are
+		// rendered as usual, then copied on the CPU into DRM dumb buffers
+		bool cursor_dumb_copy;
+		struct wlr_allocator *cursor_dumb_allocator;
+		struct wlr_swapchain *cursor_dumb_swapchain;
 	} WLR_PRIVATE;
 };
 

@@ -1697,6 +1697,8 @@ static bool connect_drm_connector(struct wlr_drm_connector *wlr_conn,
 	wlr_output_init(output, &drm->backend, &output_impl, drm->session->event_loop, &state);
 	wlr_output_state_finish(&state);
 
+	output->cursor_dumb_copy = drm->cursor_dumb_copy;
+
 	// fill out the modes
 	wl_list_insert_list(&output->modes, &modes);
 

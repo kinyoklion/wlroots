@@ -95,6 +95,18 @@ static int reopen_drm_node(int drm_fd, bool allow_render_node) {
 	return new_fd;
 }
 
+struct wlr_allocator *allocator_create_drm_dumb(int drm_fd) {
+	int dumb_fd = reopen_drm_node(drm_fd, false);
+	if (dumb_fd < 0) {
+		return NULL;
+	}
+	struct wlr_allocator *alloc = wlr_drm_dumb_allocator_create(dumb_fd);
+	if (alloc == NULL) {
+		close(dumb_fd);
+	}
+	return alloc;
+}
+
 struct wlr_allocator *wlr_allocator_autocreate(struct wlr_backend *backend,
 		struct wlr_renderer *renderer) {
 	uint32_t backend_caps = backend->buffer_caps;

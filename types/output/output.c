@@ -266,6 +266,8 @@ static void output_apply_state(struct wlr_output *output,
 		output->swapchain = NULL;
 		wlr_swapchain_destroy(output->cursor_swapchain);
 		output->cursor_swapchain = NULL;
+		wlr_swapchain_destroy(output->cursor_dumb_swapchain);
+		output->cursor_dumb_swapchain = NULL;
 	}
 
 	if (state->committed & WLR_OUTPUT_STATE_LAYERS) {
@@ -420,7 +422,9 @@ void wlr_output_finish(struct wlr_output *output) {
 	}
 
 	wlr_swapchain_destroy(output->cursor_swapchain);
+	wlr_swapchain_destroy(output->cursor_dumb_swapchain);
 	wlr_buffer_unlock(output->cursor_front_buffer);
+	wlr_allocator_destroy(output->cursor_dumb_allocator);
 	wlr_color_transform_unref(output->color_transform);
 
 	wlr_swapchain_destroy(output->swapchain);

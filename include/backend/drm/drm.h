@@ -129,6 +129,9 @@ struct wlr_drm_backend {
 	struct wlr_drm_format_set mgpu_formats;
 
 	bool supports_tearing_page_flips;
+
+	// Virtual GPU: copy hardware cursor images into DRM dumb buffers
+	bool cursor_dumb_copy;
 };
 
 struct wlr_drm_mode {

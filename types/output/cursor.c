@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <drm_fourcc.h>
 #include <stdlib.h>
+#include <wlr/backend.h>
 #include <wlr/interfaces/wlr_output.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/swapchain.h>
@@ -10,7 +11,9 @@
 #include <wlr/util/log.h>
 #include <wlr/util/region.h>
 #include <wlr/util/transform.h>
+#include "render/allocator/drm_dumb.h"
 #include "render/color.h"
+#include "render/drm_format_set.h"
 #include "types/wlr_buffer.h"
 #include "types/wlr_output.h"
 
@@ -182,6 +185,97 @@ static bool output_pick_cursor_format(struct wlr_output *output,
 	return output_pick_format(output, display_formats, format, DRM_FORMAT_ARGB8888);
 }
 
+/**
+ * Copy a GPU-rendered cursor buffer into a CPU-written DRM dumb buffer.
+ *
+ * On virtual GPUs the cursor plane is not scanned out: the hypervisor fetches
+ * the cursor image and shows it as the host's own pointer. With virtio-gpu and
+ * virgl, the host reads a GPU-rendered cursor buffer back upside down, so the
+ * pointer appears flipped and offset from its hotspot. Dumb buffers go through
+ * the driver's plain CPU upload path instead. KWin does the same for virtual
+ * machines (BufferTarget::Dumb + glReadnPixels).
+ */
+static struct wlr_buffer *copy_cursor_buffer_to_dumb(struct wlr_output *output,
+		struct wlr_buffer *src) {
+	if (output->cursor_dumb_allocator == NULL) {
+		int drm_fd = wlr_backend_get_drm_fd(output->backend);
+		if (drm_fd < 0) {
+			return NULL;
+		}
+		output->cursor_dumb_allocator = allocator_create_drm_dumb(drm_fd);
+		if (output->cursor_dumb_allocator == NULL) {
+			wlr_log(WLR_ERROR, "Failed to create DRM dumb allocator for cursor");
+			return NULL;
+		}
+	}
+
+	struct wlr_dmabuf_attributes attribs;
+	if (!wlr_buffer_get_dmabuf(src, &attribs)) {
+		wlr_log(WLR_DEBUG, "Cursor buffer is not a DMA-BUF, cannot copy it");
+		return NULL;
+	}
+
+	struct wlr_swapchain *swapchain = output->cursor_dumb_swapchain;
+	if (swapchain == NULL || swapchain->width != src->width ||
+			swapchain->height != src->height ||
+			swapchain->format.format != attribs.format) {
+		struct wlr_drm_format format = {0};
+		wlr_drm_format_init(&format, attribs.format);
+		if (!wlr_drm_format_add(&format, DRM_FORMAT_MOD_LINEAR)) {
+			wlr_drm_format_finish(&format);
+			return NULL;
+		}
+
+		wlr_swapchain_destroy(output->cursor_dumb_swapchain);
+		output->cursor_dumb_swapchain = wlr_swapchain_create(
+			output->cursor_dumb_allocator, src->width, src->height, &format);
+		wlr_drm_format_finish(&format);
+		if (output->cursor_dumb_swapchain == NULL) {
+			wlr_log(WLR_ERROR, "Failed to create cursor dumb buffer swapchain");
+			return NULL;
+		}
+		swapchain = output->cursor_dumb_swapchain;
+	}
+
+	struct wlr_texture *texture = wlr_texture_from_buffer(output->renderer, src);
+	if (texture == NULL) {
+		wlr_log(WLR_ERROR, "Failed to import cursor buffer for read-back");
+		return NULL;
+	}
+
+	struct wlr_buffer *dst = wlr_swapchain_acquire(swapchain);
+	if (dst == NULL) {
+		wlr_texture_destroy(texture);
+		return NULL;
+	}
+
+	void *data;
+	uint32_t format;
+	size_t stride;
+	if (!wlr_buffer_begin_data_ptr_access(dst, WLR_BUFFER_DATA_PTR_ACCESS_WRITE,
+			&data, &format, &stride)) {
+		wlr_texture_destroy(texture);
+		wlr_buffer_unlock(dst);
+		return NULL;
+	}
+
+	bool ok = wlr_texture_read_pixels(texture, &(struct wlr_texture_read_pixels_options){
+		.data = data,
+		.format = format,
+		.stride = stride,
+	});
+	wlr_buffer_end_data_ptr_access(dst);
+	wlr_texture_destroy(texture);
+
+	if (!ok) {
+		wlr_log(WLR_ERROR, "Failed to read back cursor pixels");
+		wlr_buffer_unlock(dst);
+		return NULL;
+	}
+
+	return dst;
+}
+
 static struct wlr_buffer *render_cursor_buffer(struct wlr_output_cursor *cursor) {
 	struct wlr_output *output = cursor->output;
 
@@ -284,6 +378,15 @@ static struct wlr_buffer *render_cursor_buffer(struct wlr_output_cursor *cursor)
 	if (!wlr_render_pass_submit(pass)) {
 		wlr_buffer_unlock(buffer);
 		return NULL;
+	}
+
+	// A CPU-accessible allocator (e.g. pixman + dumb buffers) already wrote
+	// the pixels from the CPU, so there is nothing to copy
+	if (output->cursor_dumb_copy &&
+			!(allocator->buffer_caps & WLR_BUFFER_CAP_DATA_PTR)) {
+		struct wlr_buffer *copy = copy_cursor_buffer_to_dumb(output, buffer);
+		wlr_buffer_unlock(buffer);
+		return copy;
 	}
 
 	return buffer;

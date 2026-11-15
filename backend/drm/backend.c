@@ -12,6 +12,7 @@
 #include "backend/drm/drm.h"
 #include "backend/drm/fb.h"
 #include "render/drm_format_set.h"
+#include "util/env.h"
 
 struct wlr_drm_backend *get_drm_backend_from_backend(
 		struct wlr_backend *wlr_backend) {
@@ -205,6 +206,22 @@ static bool init_mgpu_renderer(struct wlr_drm_backend *drm) {
 	return true;
 }
 
+static bool is_virtual_gpu_driver(const char *driver) {
+	// Same set of drivers as KWin's DrmGpu::isVirtualMachine()
+	static const char *const drivers[] = {
+		"virtio_gpu",
+		"qxl",
+		"vmwgfx",
+		"vboxvideo",
+	};
+	for (size_t i = 0; i < sizeof(drivers) / sizeof(drivers[0]); i++) {
+		if (strcmp(driver, drivers[i]) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
 struct wlr_backend *wlr_drm_backend_create(struct wlr_session *session,
 		struct wlr_device *dev, struct wlr_backend *parent) {
 	assert(session && dev);
@@ -223,6 +240,7 @@ struct wlr_backend *wlr_drm_backend_create(struct wlr_session *session,
 		return NULL;
 	}
 	wlr_log(WLR_INFO, "Initializing DRM backend for %s (%s)", name, version->name);
+	bool virtual_gpu = is_virtual_gpu_driver(version->name);
 	drmFreeVersion(version);
 
 	struct wlr_drm_backend *drm = calloc(1, sizeof(*drm));
@@ -250,6 +268,19 @@ struct wlr_backend *wlr_drm_backend_create(struct wlr_session *session,
 		wl_signal_add(&parent->events.destroy, &drm->parent_destroy);
 	} else {
 		wl_list_init(&drm->parent_destroy.link);
+
+		// Virtual GPUs hand the cursor image to the hypervisor, which shows
+		// it as the host pointer; GPU-rendered cursor buffers can come out
+		// flipped there (virtio-gpu + virgl), so copy them into dumb buffers
+		if (getenv("WLR_DRM_DUMB_CURSORS") != NULL) {
+			drm->cursor_dumb_copy = env_parse_bool("WLR_DRM_DUMB_CURSORS");
+		} else {
+			drm->cursor_dumb_copy = virtual_gpu;
+		}
+		if (drm->cursor_dumb_copy) {
+			wlr_log(WLR_INFO, "Copying hardware cursor images into "
+				"DRM dumb buffers on %s", name);
+		}
 	}
 
 	drm->dev_change.notify = handle_dev_change;

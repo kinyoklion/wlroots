@@ -34,4 +34,12 @@ struct wlr_drm_dumb_allocator {
  */
 struct wlr_allocator *wlr_drm_dumb_allocator_create(int fd);
 
+/**
+ * Creates a new drm dumb allocator on a re-opened node of the DRM device
+ * behind drm_fd (a primary node, authenticated if drm_fd is DRM master).
+ *
+ * Does not take ownership over drm_fd.
+ */
+struct wlr_allocator *allocator_create_drm_dumb(int drm_fd);
+
 #endif
